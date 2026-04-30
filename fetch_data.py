@@ -7,7 +7,7 @@ from datetime import datetime
 app = Flask(__name__)
 
 # ==========================================
-# ⚙️ إعدادات المسارات (مهيأة للسيرفر السحابي)
+# ⚙️ إعدادات المسارات 
 # ==========================================
 EXCEL_FILE_PATH = "staff_data.xlsx"
 
@@ -27,9 +27,34 @@ def get_live_data():
         "lang": "ar",
         "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
     }
+    
+    # 🔴 التعديل هنا: إرجاع الـ Payload الكامل الخاص بك لتجنب خطأ الـ Null في السيرفر
     payload = {
-        "paging": {"sortField": "Id", "searchOrder": 2, "pageIndex": 1, "totalRowsCount": 10437, "totalPages": 1044, "pageSize": 5000, "sortBy": "Id Desc"},
-        "data": {"searchText": "", "ActiveStatus": [True], "isDeleted": False}
+        "paging": {
+            "sortField": "Id",
+            "searchOrder": 2,
+            "pageIndex": 1,
+            "totalRowsCount": 10437,
+            "totalPages": 1044,
+            "pageSize": 5000, 
+            "sortBy": "Id Desc"
+        },
+        "data": {
+            "searchText": "",
+            "name": "",
+            "EmployeeId": None,
+            "OccupationIds": [],
+            "DepartmentIds": [],
+            "SectionIds": [],
+            "WorkShiftIds": [],
+            "EmployeeTypes": [],
+            "ManagerIds": [],
+            "OperatorCompanyIds": [],
+            "NationalIdExpired": [],
+            "ActiveStatus": [True],
+            "isPrinted": None,
+            "isDeleted": False
+        }
     }
 
     try:
@@ -37,7 +62,6 @@ def get_live_data():
         if response.status_code == 200:
             api_res = response.json()
             
-            # --- التعديل الذكي لمعالجة الـ null ---
             if not isinstance(api_res, dict):
                 return None, "رد غير مفهوم من السيرفر."
                 
@@ -47,7 +71,6 @@ def get_live_data():
                 return None, f"تنبيه من السيرفر: {server_msg}"
                 
             all_employees = res_data if isinstance(res_data, list) else res_data.get('list', [])
-            # ----------------------------------------
             
             if not all_employees:
                 return None, "لا توجد بيانات حالية في السيرفر"
@@ -55,7 +78,6 @@ def get_live_data():
             df = pd.DataFrame(all_employees)
             df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
 
-            # الربط مع ملف الإكسيل
             if os.path.exists(EXCEL_FILE_PATH):
                 try:
                     df_excel = pd.read_excel(EXCEL_FILE_PATH)
@@ -86,9 +108,6 @@ def index():
     if error or df is None:
         return f"<h1 style='text-align:center; margin-top:50px; font-family:sans-serif;'>⚠️ عذراً، خطأ في السيرفر: {error}</h1>"
 
-    # -------------------------------------------------------------
-    # 📊 حساب الإحصائيات المطلوبة
-    # -------------------------------------------------------------
     total_employees = len(df)
     total_companies = df['operatorCompanyName'].nunique()
     total_shifts = df['workShiftName'].nunique()
