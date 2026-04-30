@@ -58,7 +58,7 @@ def get_live_data():
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
+       response = requests.post(url, headers=headers, json=payload, timeout=120)
         if response.status_code == 200:
             api_res = response.json()
             
