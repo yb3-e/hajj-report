@@ -2,7 +2,7 @@ from flask import Flask, render_template_string
 import requests
 import pandas as pd
 import os
-import gc  # مكتبة إدارة الذاكرة وتفريغ الرام
+import gc
 from datetime import datetime
 
 app = Flask(__name__)
@@ -23,7 +23,7 @@ def get_live_data():
     url = "https://tnql-prod.sejeltech.app/api/StaffMember/GetStaffMember"
     headers = {
         "accept": "application/json",
-        "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NTAxNzA2LCJleHAiOjE3Nzc1NDQ5MDYsImlhdCI6MTc3NzUwMTcwNiwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.MDWDyiZQj3xg4e_zDAtcPF9moWsOiAWD96_CJX8L71c",
+        "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NTg3MTU2LCJleHAiOjE3Nzc2MzAzNTYsImlhdCI6MTc3NzU4NzE1NiwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.VEp2uPPTCMPM_vtbw5cuEpH3tMM7vpHbkA17h0wkYbo",
         "content-type": "application/json",
         "lang": "ar",
         "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
@@ -77,12 +77,10 @@ def get_live_data():
 
             df = pd.DataFrame(all_employees)
 
-            # 🧹 --- هندسة الذاكرة: تفريغ الرام من المتغيرات الثقيلة فوراً ---
             del api_res
             del res_data
             del all_employees
             gc.collect() 
-            # -------------------------------------------------------------
 
             df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
 
@@ -95,14 +93,11 @@ def get_live_data():
                         df_excel[id_col] = df_excel[id_col].astype(str).str.strip()
                         excel_subset = df_excel.drop_duplicates(subset=[id_col])
                         
-                        # دمج البيانات
                         df = pd.merge(df, excel_subset, left_on=API_COL_ID, right_on=id_col, how='left')
                         
-                        # 🧹 --- تنظيف الرام من ملف الإكسيل بعد الدمج ---
                         del df_excel
                         del excel_subset
                         gc.collect()
-                        # -----------------------------------------------
 
                         for api_c, ex_list in [('operatorCompanyName', COL_NAMES_COMPANY), ('occupationName', COL_NAMES_JOB), ('workShiftName', COL_NAMES_SHIFT)]:
                             ex_c = next((c for c in ex_list if c in df.columns), None)
@@ -138,12 +133,9 @@ def index():
     permanent_count = len(df[df['mapped_type'] == 'دائم'])
     seasonal_count = len(df[df['mapped_type'] == 'موسمي'])
 
-    # 🧹 --- تنظيف المتغيرات بعد حساب الإحصائيات وقبل عرض الصفحة ---
-    # نأخذ نسخة من البيانات التي نحتاجها فقط لتخفيف حجم الـ df النهائي
     df_lite = df[['operatorCompanyName', 'workShiftName', 'occupationName']].copy()
     del df
     gc.collect()
-    # -------------------------------------------------------------
 
     html_content = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
