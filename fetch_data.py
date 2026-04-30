@@ -2,6 +2,7 @@ from flask import Flask, render_template_string
 import requests
 import pandas as pd
 import os
+import gc  # مكتبة إدارة الذاكرة وتفريغ الرام
 from datetime import datetime
 
 app = Flask(__name__)
@@ -28,7 +29,6 @@ def get_live_data():
         "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
     }
     
-    # 🔴 التعديل هنا: إرجاع الـ Payload الكامل الخاص بك لتجنب خطأ الـ Null في السيرفر
     payload = {
         "paging": {
             "sortField": "Id",
@@ -76,6 +76,14 @@ def get_live_data():
                 return None, "لا توجد بيانات حالية في السيرفر"
 
             df = pd.DataFrame(all_employees)
+
+            # 🧹 --- هندسة الذاكرة: تفريغ الرام من المتغيرات الثقيلة فوراً ---
+            del api_res
+            del res_data
+            del all_employees
+            gc.collect() 
+            # -------------------------------------------------------------
+
             df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
 
             if os.path.exists(EXCEL_FILE_PATH):
@@ -86,10 +94,18 @@ def get_live_data():
                     if id_col:
                         df_excel[id_col] = df_excel[id_col].astype(str).str.strip()
                         excel_subset = df_excel.drop_duplicates(subset=[id_col])
+                        
+                        # دمج البيانات
                         df = pd.merge(df, excel_subset, left_on=API_COL_ID, right_on=id_col, how='left')
                         
+                        # 🧹 --- تنظيف الرام من ملف الإكسيل بعد الدمج ---
+                        del df_excel
+                        del excel_subset
+                        gc.collect()
+                        # -----------------------------------------------
+
                         for api_c, ex_list in [('operatorCompanyName', COL_NAMES_COMPANY), ('occupationName', COL_NAMES_JOB), ('workShiftName', COL_NAMES_SHIFT)]:
-                            ex_c = next((c for c in ex_list if c in df_excel.columns), None)
+                            ex_c = next((c for c in ex_list if c in df.columns), None)
                             if ex_c: df[api_c] = df[ex_c].fillna(df[api_c])
                 except Exception as e:
                     print(f"Excel Error: {e}")
@@ -121,6 +137,13 @@ def index():
     df['mapped_type'] = df['employeeTypeName'].apply(clean_type)
     permanent_count = len(df[df['mapped_type'] == 'دائم'])
     seasonal_count = len(df[df['mapped_type'] == 'موسمي'])
+
+    # 🧹 --- تنظيف المتغيرات بعد حساب الإحصائيات وقبل عرض الصفحة ---
+    # نأخذ نسخة من البيانات التي نحتاجها فقط لتخفيف حجم الـ df النهائي
+    df_lite = df[['operatorCompanyName', 'workShiftName', 'occupationName']].copy()
+    del df
+    gc.collect()
+    # -------------------------------------------------------------
 
     html_content = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -194,18 +217,18 @@ def index():
                     <span class="shift-name">📍 {s}</span>
                     <ul class="jobs-list">
                         {" ".join([f'<li><span>{j}</span><span class="job-val">{v}</span></li>' 
-                        for j, v in df[(df['operatorCompanyName']==c) & (df['workShiftName']==s)]['occupationName'].value_counts().items()])}
+                        for j, v in df_lite[(df_lite['operatorCompanyName']==c) & (df_lite['workShiftName']==s)]['occupationName'].value_counts().items()])}
                     </ul>
-                </div>''' for s in df[df['operatorCompanyName']==c]['workShiftName'].unique()])}
+                </div>''' for s in df_lite[df_lite['operatorCompanyName']==c]['workShiftName'].unique()])}
             </div>
-        </div>''' for c in df['operatorCompanyName'].unique()])}
+        </div>''' for c in df_lite['operatorCompanyName'].unique()])}
     </div>
 
     <div class="grand-summary">
         <h2>📊 الملخص العام للوظائف (كافة الشركات)</h2>
         <div class="grand-grid">
             {" ".join([f'<div class="grand-item"><span>{j}</span><span class="job-val">{v}</span></div>' 
-            for j, v in df['occupationName'].value_counts().items()])}
+            for j, v in df_lite['occupationName'].value_counts().items()])}
         </div>
     </div>
 
