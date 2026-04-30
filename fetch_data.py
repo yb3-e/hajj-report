@@ -4,13 +4,16 @@ import pandas as pd
 import os
 import gc
 from datetime import datetime
+import threading
+import time
 
 app = Flask(__name__)
 
 # ==========================================
-# ⚙️ إعدادات المسارات 
+# ⚙️ إعدادات المسارات والملفات
 # ==========================================
 EXCEL_FILE_PATH = "staff_data.xlsx"
+CACHE_FILE = "cached_report.html"
 
 COL_NAMES_ID = ["رقم الهوية", "الهوية", "رقم الهويه"]
 COL_NAMES_COMPANY = ["الشركة المشغلة", "الشركة"]
@@ -19,61 +22,46 @@ COL_NAMES_SHIFT = ["الوردية", "الوقت"]
 API_COL_ID = "nationalId" 
 # ==========================================
 
-def get_live_data():
-    url = "https://tnql-prod.sejeltech.app/api/StaffMember/GetStaffMember"
-    headers = {
-        "accept": "application/json",
-        "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NTg3MTU2LCJleHAiOjE3Nzc2MzAzNTYsImlhdCI6MTc3NzU4NzE1NiwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.VEp2uPPTCMPM_vtbw5cuEpH3tMM7vpHbkA17h0wkYbo",
-        "content-type": "application/json",
-        "lang": "ar",
-        "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
-    }
-    
-    payload = {
-        "paging": {
-            "sortField": "Id",
-            "searchOrder": 2,
-            "pageIndex": 1,
-            "totalRowsCount": 10437,
-            "totalPages": 1044,
-            "pageSize": 5000, 
-            "sortBy": "Id Desc"
-        },
-        "data": {
-            "searchText": "",
-            "name": "",
-            "EmployeeId": None,
-            "OccupationIds": [],
-            "DepartmentIds": [],
-            "SectionIds": [],
-            "WorkShiftIds": [],
-            "EmployeeTypes": [],
-            "ManagerIds": [],
-            "OperatorCompanyIds": [],
-            "NationalIdExpired": [],
-            "ActiveStatus": [True],
-            "isPrinted": None,
-            "isDeleted": False
-        }
-    }
+# حالة السيرفر لمنع التحديث المتكرر في نفس اللحظة
+is_updating = False 
+
+def fetch_and_build_html():
+    global is_updating
+    if is_updating:
+        return
+    is_updating = True
 
     try:
-       response = requests.post(url, headers=headers, json=payload, timeout=120)
+        url = "https://tnql-prod.sejeltech.app/api/StaffMember/GetStaffMember"
+        headers = {
+            "accept": "application/json",
+            "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NTg3MTU2LCJleHAiOjE3Nzc2MzAzNTYsImlhdCI6MTc3NzU4NzE1NiwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.VEp2uPPTCMPM_vtbw5cuEpH3tMM7vpHbkA17h0wkYbo",
+            "content-type": "application/json",
+            "lang": "ar",
+            "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
+        }
+        
+        payload = {
+            "paging": {
+                "sortField": "Id", "searchOrder": 2, "pageIndex": 1,
+                "totalRowsCount": 10437, "totalPages": 1044, "pageSize": 5000, "sortBy": "Id Desc"
+            },
+            "data": {
+                "searchText": "", "ActiveStatus": [True], "isDeleted": False
+            }
+        }
+
+        # عطيناه وقت طويل براحته لأنه شغال في الخلفية
+        response = requests.post(url, headers=headers, json=payload, timeout=200)
+        
         if response.status_code == 200:
             api_res = response.json()
-            
-            if not isinstance(api_res, dict):
-                return None, "رد غير مفهوم من السيرفر."
-                
-            res_data = api_res.get('data')
-            if res_data is None:
-                server_msg = api_res.get('message', api_res.get('Message', 'السيرفر رفض الطلب ولم يرسل بيانات.'))
-                return None, f"تنبيه من السيرفر: {server_msg}"
-                
+            res_data = api_res.get('data', {})
             all_employees = res_data if isinstance(res_data, list) else res_data.get('list', [])
             
             if not all_employees:
-                return None, "لا توجد بيانات حالية في السيرفر"
+                is_updating = False
+                return
 
             df = pd.DataFrame(all_employees)
 
@@ -106,38 +94,29 @@ def get_live_data():
                     print(f"Excel Error: {e}")
 
             df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
-            return df, None
-    except Exception as e:
-        return None, str(e)
-    return None, f"فشل الاتصال، الكود: {response.status_code}"
 
-@app.route('/')
-def index():
-    df, error = get_live_data()
-    current_time = datetime.now().strftime("%I:%M:%S %p")
-    
-    if error or df is None:
-        return f"<h1 style='text-align:center; margin-top:50px; font-family:sans-serif;'>⚠️ عذراً، خطأ في السيرفر: {error}</h1>"
+            total_employees = len(df)
+            total_companies = df['operatorCompanyName'].nunique()
+            total_shifts = df['workShiftName'].nunique()
+            
+            def clean_type(val):
+                v = str(val).lower()
+                if 'seasonal' in v or 'موسمي' in v: return 'موسمي'
+                if 'permanent' in v or 'دائم' in v: return 'دائم'
+                return 'غير محدد'
+                
+            df['mapped_type'] = df['employeeTypeName'].apply(clean_type)
+            permanent_count = len(df[df['mapped_type'] == 'دائم'])
+            seasonal_count = len(df[df['mapped_type'] == 'موسمي'])
 
-    total_employees = len(df)
-    total_companies = df['operatorCompanyName'].nunique()
-    total_shifts = df['workShiftName'].nunique()
-    
-    def clean_type(val):
-        v = str(val).lower()
-        if 'seasonal' in v or 'موسمي' in v: return 'موسمي'
-        if 'permanent' in v or 'دائم' in v: return 'دائم'
-        return 'غير محدد'
-        
-    df['mapped_type'] = df['employeeTypeName'].apply(clean_type)
-    permanent_count = len(df[df['mapped_type'] == 'دائم'])
-    seasonal_count = len(df[df['mapped_type'] == 'موسمي'])
+            df_lite = df[['operatorCompanyName', 'workShiftName', 'occupationName']].copy()
+            del df
+            gc.collect()
 
-    df_lite = df[['operatorCompanyName', 'workShiftName', 'occupationName']].copy()
-    del df
-    gc.collect()
+            current_time = datetime.now().strftime("%I:%M %p")
 
-    html_content = f"""<!DOCTYPE html>
+            # بناء صفحة الـ HTML وتخزينها
+            html_content = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -150,16 +129,13 @@ def index():
         .eng-badge .title {{ display: block; font-size: 1.2em; color: var(--accent); font-weight: 900; letter-spacing: 2px; }}
         .eng-badge .name {{ display: block; font-size: 1.8em; font-weight: 700; }}
         h1 {{ font-size: 2.8em; margin: 10px 0; position: relative; z-index: 2; text-shadow: 3px 3px 6px rgba(0,0,0,0.3); }}
-        
         .live-indicator {{ background: rgba(255,255,255,0.15); padding: 8px 20px; border-radius: 50px; font-weight: 700; font-size: 0.9em; display: inline-flex; align-items: center; gap: 10px; margin-top: 15px; border: 1px solid rgba(255,255,255,0.3); }}
         .pulse {{ height: 12px; width: 12px; background-color: #4caf50; border-radius: 50%; display: inline-block; animation: pulse-animation 1.5s infinite; }}
         @keyframes pulse-animation {{ 0% {{ box-shadow: 0 0 0 0px rgba(76, 175, 80, 0.7); }} 100% {{ box-shadow: 0 0 0 10px rgba(76, 175, 80, 0); }} }}
-
         .stats-container {{ display: flex; gap: 15px; justify-content: center; margin: -40px 0 50px; position: relative; z-index: 3; flex-wrap: wrap; }}
         .stat-card {{ background: white; padding: 20px 15px; border-radius: 20px; text-align: center; min-width: 160px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border-bottom: 6px solid var(--accent); flex: 1; max-width: 200px; }}
         .stat-card b {{ display: block; font-size: 2.5em; color: var(--primary); line-height: 1.1; margin-bottom: 5px; }}
         .stat-card span {{ font-size: 0.95em; font-weight: 700; color: #7f8c8d; }}
-        
         .company-card {{ background: white; padding: 35px; border-radius: 30px; margin-bottom: 40px; box-shadow: 0 15px 40px rgba(0,0,0,0.05); }}
         .company-title {{ font-size: 2em; color: var(--primary); border-bottom: 3px solid #f0f0f0; padding-bottom: 20px; margin-bottom: 25px; font-weight: 900; }}
         .shift-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 25px; }}
@@ -168,29 +144,20 @@ def index():
         .jobs-list {{ list-style: none; padding: 0; margin: 0; }}
         .jobs-list li {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #ddd; font-weight: 700; }}
         .job-val {{ background: var(--primary); color: white; padding: 3px 12px; border-radius: 8px; font-size: 0.9em; }}
-        
         .grand-summary {{ background: #ffffff; border: 4px solid var(--primary); padding: 40px; border-radius: 40px; margin-top: 60px; }}
         .grand-summary h2 {{ text-align: center; color: var(--primary); font-size: 2.2em; margin-bottom: 35px; font-weight: 900; }}
         .grand-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }}
         .grand-item {{ background: #e0f2f1; padding: 15px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; font-weight: 800; border-right: 5px solid var(--primary); }}
-
         .footer {{ text-align: center; margin-top: 80px; padding: 50px; border-top: 2px solid #eee; color: #7f8c8d; }}
         .footer b {{ color: var(--primary); font-size: 1.5em; display: block; margin-top: 10px; font-family: 'Courier New', monospace; }}
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="eng-badge" dir="ltr">
-            <span class="title">Eng.</span>
-            <span class="name">Abdulaziz Alshehri</span>
-        </div>
+        <div class="eng-badge" dir="ltr"><span class="title">Eng.</span><span class="name">Abdulaziz Alshehri</span></div>
         <h1>التقرير الشامل لموسم حج 1447</h1>
-        <div class="live-indicator">
-            <span class="pulse"></span>
-            تحديث لحظي الآن: {current_time}
-        </div>
+        <div class="live-indicator"><span class="pulse"></span>آخر تحديث تلقائي للبيانات: {current_time}</div>
     </div>
-
     <div class="stats-container">
         <div class="stat-card"><b>{total_employees}</b><span>إجمالي الفعالين</span></div>
         <div class="stat-card"><b>{permanent_count}</b><span>موظفين دائمين</span></div>
@@ -198,40 +165,45 @@ def index():
         <div class="stat-card"><b>{total_companies}</b><span>الشركات المشغلة</span></div>
         <div class="stat-card"><b>{total_shifts}</b><span>إجمالي الورديات</span></div>
     </div>
-
     <div class="content">
-        {''' '''.join([f'''
-        <div class="company-card">
-            <div class="company-title">🏢 {c}</div>
-            <div class="shift-grid">
-                {" ".join([f'''
-                <div class="shift-box">
-                    <span class="shift-name">📍 {s}</span>
-                    <ul class="jobs-list">
-                        {" ".join([f'<li><span>{j}</span><span class="job-val">{v}</span></li>' 
-                        for j, v in df_lite[(df_lite['operatorCompanyName']==c) & (df_lite['workShiftName']==s)]['occupationName'].value_counts().items()])}
-                    </ul>
-                </div>''' for s in df_lite[df_lite['operatorCompanyName']==c]['workShiftName'].unique()])}
-            </div>
-        </div>''' for c in df_lite['operatorCompanyName'].unique()])}
+        {''' '''.join([f'''<div class="company-card"><div class="company-title">🏢 {c}</div><div class="shift-grid">{" ".join([f'''<div class="shift-box"><span class="shift-name">📍 {s}</span><ul class="jobs-list">{" ".join([f'<li><span>{j}</span><span class="job-val">{v}</span></li>' for j, v in df_lite[(df_lite['operatorCompanyName']==c) & (df_lite['workShiftName']==s)]['occupationName'].value_counts().items()])}</ul></div>''' for s in df_lite[df_lite['operatorCompanyName']==c]['workShiftName'].unique()])}</div></div>''' for c in df_lite['operatorCompanyName'].unique()])}
     </div>
+    <div class="grand-summary"><h2>📊 الملخص العام للوظائف (كافة الشركات)</h2><div class="grand-grid">{" ".join([f'<div class="grand-item"><span>{j}</span><span class="job-val">{v}</span></div>' for j, v in df_lite['occupationName'].value_counts().items()])}</div></div>
+    <div class="footer" dir="ltr">PREPARED BY<br><b>Eng. Abdulaziz Alshehri</b></div>
+</body></html>"""
+            
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                f.write(html_content)
+                
+    except Exception as e:
+        print(f"Error fetching: {e}")
+    finally:
+        is_updating = False
 
-    <div class="grand-summary">
-        <h2>📊 الملخص العام للوظائف (كافة الشركات)</h2>
-        <div class="grand-grid">
-            {" ".join([f'<div class="grand-item"><span>{j}</span><span class="job-val">{v}</span></div>' 
-            for j, v in df_lite['occupationName'].value_counts().items()])}
+@app.route('/')
+def index():
+    # التحقق من وجود التقرير وعمره
+    need_update = True
+    if os.path.exists(CACHE_FILE):
+        file_age = time.time() - os.path.getmtime(CACHE_FILE)
+        if file_age < 7200: # 7200 ثانية = ساعتين
+            need_update = False
+            
+    if need_update:
+        # تشغيل التحديث في الخلفية بدون ما نوقف المتصفح
+        threading.Thread(target=fetch_and_build_html).start()
+        
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            return f.read()
+    else:
+        return """
+        <div style="text-align:center; margin-top:100px; font-family:sans-serif; direction:rtl;">
+            <h1 style="color:#004d40;">⚙️ جاري تجهيز التقرير لأول مرة...</h1>
+            <p style="font-size:1.2em; color:#555;">النظام يقوم حالياً بسحب ومعالجة آلاف البيانات من السيرفرات في الخلفية.</p>
+            <b style="color:red;">يرجى تحديث الصفحة (F5) بعد دقيقتين أو ثلاث دقائق.</b>
         </div>
-    </div>
-
-    <div class="footer" dir="ltr">
-        PREPARED BY<br>
-        <b>Eng. Abdulaziz Alshehri</b>
-    </div>
-</body>
-</html>
-"""
-    return render_template_string(html_content)
+        """
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
