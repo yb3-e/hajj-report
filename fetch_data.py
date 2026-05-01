@@ -33,7 +33,6 @@ def fetch_and_build_html():
     try:
         url = "https://tnql-prod.sejeltech.app/api/StaffMember/GetStaffMember"
         
-        # التوكن الجديد (تم التحديث بنجاح)
         TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NjEyNTM4LCJleHAiOjE3Nzc2NTU3MzgsImlhdCI6MTc3NzYxMjUzOCwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.kllYcwHoTovb_nsqYEmgwiEi2fyR8qI8FV8pQh8yKlE"
         
         headers = {
@@ -44,13 +43,27 @@ def fetch_and_build_html():
             "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
         }
         
+        # ⚠️ هنا التعديل: رجعنا كل الخانات اللي يطلبها السيرفر بالضبط
         payload = {
             "paging": {
                 "sortField": "Id", "searchOrder": 2, "pageIndex": 1,
                 "totalRowsCount": 7480, "totalPages": 748, "pageSize": 5000, "sortBy": "Id Desc"
             },
             "data": {
-                "searchText": "", "ActiveStatus": [True], "isDeleted": False
+                "searchText": "",
+                "name": "",
+                "EmployeeId": None,
+                "OccupationIds": [],
+                "DepartmentIds": [],
+                "SectionIds": [],
+                "WorkShiftIds": [],
+                "EmployeeTypes": [],
+                "ManagerIds": [],
+                "OperatorCompanyIds": [],
+                "NationalIdExpired": [],
+                "ActiveStatus": [True],
+                "isPrinted": None,
+                "isDeleted": False
             }
         }
 
@@ -63,7 +76,7 @@ def fetch_and_build_html():
                 api_res = None
                 
             if not isinstance(api_res, dict):
-                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ نظام سجل رفض إرسال البيانات!<br>السبب الأكيد: انتهت صلاحية التوكن (Token) ويحتاج تحديث.</h1>"
+                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ نظام سجل رفض إرسال البيانات بشكل غير متوقع.</h1>"
                 with open(CACHE_FILE, "w", encoding="utf-8") as f:
                     f.write(error_msg)
                 return
@@ -71,7 +84,7 @@ def fetch_and_build_html():
             res_data = api_res.get('data')
             if res_data is None:
                 msg = api_res.get('message', 'لا توجد بيانات')
-                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ سجل رفض إعطاء البيانات!<br>الرسالة: {msg}<br>السبب: التوكن منتهي.</h1>"
+                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ سجل رفض إعطاء البيانات!<br>الرسالة: {msg}</h1>"
                 with open(CACHE_FILE, "w", encoding="utf-8") as f:
                     f.write(error_msg)
                 return
@@ -193,7 +206,7 @@ def fetch_and_build_html():
                 f.write(error_msg)
                 
     except Exception as e:
-        error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ انتهى الوقت (Timeout) ولم يرد سيرفر سجل!<br>التفاصيل: {str(e)}</h1>"
+        error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ انتهى الوقت ولم يرد سيرفر سجل!<br>التفاصيل: {str(e)}</h1>"
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             f.write(error_msg)
     finally:
@@ -218,7 +231,7 @@ def index():
     else:
         return """
         <div style="text-align:center; margin-top:100px; font-family:sans-serif; direction:rtl;">
-            <h1 style="color:#004d40;">⚙️ جاري محاولة الاتصال بنظام سجل...</h1>
+            <h1 style="color:#004d40;">⚙️ جاري معالجة التقرير...</h1>
             <p style="font-size:1.2em; color:#555;">يرجى الانتظار دقيقة واحدة ثم تحديث الصفحة (F5).</p>
         </div>
         """
