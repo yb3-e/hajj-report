@@ -10,7 +10,7 @@ import time
 app = Flask(__name__)
 
 # ==========================================
-# ⚙️ إعدادات المسارات والملفات
+# ⚙️ إعدادات المسارات
 # ==========================================
 EXCEL_FILE_PATH = "staff_data.xlsx"
 CACHE_FILE = "cached_report.html"
@@ -22,7 +22,6 @@ COL_NAMES_SHIFT = ["الوردية", "الوقت"]
 API_COL_ID = "nationalId" 
 # ==========================================
 
-# حالة السيرفر لمنع التحديث المتكرر في نفس اللحظة
 is_updating = False 
 
 def fetch_and_build_html():
@@ -51,7 +50,6 @@ def fetch_and_build_html():
             }
         }
 
-        # عطيناه وقت طويل براحته لأنه شغال في الخلفية
         response = requests.post(url, headers=headers, json=payload, timeout=200)
         
         if response.status_code == 200:
@@ -60,14 +58,14 @@ def fetch_and_build_html():
             all_employees = res_data if isinstance(res_data, list) else res_data.get('list', [])
             
             if not all_employees:
-                is_updating = False
+                # إذا السيرفر رد بس مافي بيانات
+                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ نظام سجل رفض إرسال البيانات!<br>السبب المتوقع: التوكن انتهى أو هناك حظر جغرافي على سيرفرات Render.</h1>"
+                with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                    f.write(error_msg)
                 return
 
             df = pd.DataFrame(all_employees)
-
-            del api_res
-            del res_data
-            del all_employees
+            del api_res, res_data, all_employees
             gc.collect() 
 
             df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
@@ -80,18 +78,14 @@ def fetch_and_build_html():
                     if id_col:
                         df_excel[id_col] = df_excel[id_col].astype(str).str.strip()
                         excel_subset = df_excel.drop_duplicates(subset=[id_col])
-                        
                         df = pd.merge(df, excel_subset, left_on=API_COL_ID, right_on=id_col, how='left')
-                        
-                        del df_excel
-                        del excel_subset
+                        del df_excel, excel_subset
                         gc.collect()
-
                         for api_c, ex_list in [('operatorCompanyName', COL_NAMES_COMPANY), ('occupationName', COL_NAMES_JOB), ('workShiftName', COL_NAMES_SHIFT)]:
                             ex_c = next((c for c in ex_list if c in df.columns), None)
                             if ex_c: df[api_c] = df[ex_c].fillna(df[api_c])
                 except Exception as e:
-                    print(f"Excel Error: {e}")
+                    pass
 
             df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
 
@@ -115,7 +109,6 @@ def fetch_and_build_html():
 
             current_time = datetime.now().strftime("%I:%M %p")
 
-            # بناء صفحة الـ HTML وتخزينها
             html_content = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -174,34 +167,42 @@ def fetch_and_build_html():
             
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
                 f.write(html_content)
+        else:
+            # إذا رفض الاتصال برمز خطأ (مثل 401 أو 403 أو 500)
+            error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ سيرفر سجل رفض الاتصال!<br>رمز الخطأ: {response.status_code}</h1>"
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                f.write(error_msg)
                 
     except Exception as e:
-        print(f"Error fetching: {e}")
+        # إذا انقطع الاتصال تماماً (Timeout)
+        error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ انتهى الوقت (Timeout) ولم يرد سيرفر سجل!<br>التفاصيل: {str(e)}</h1>"
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            f.write(error_msg)
     finally:
         is_updating = False
 
 @app.route('/')
 def index():
-    # التحقق من وجود التقرير وعمره
     need_update = True
     if os.path.exists(CACHE_FILE):
         file_age = time.time() - os.path.getmtime(CACHE_FILE)
-        if file_age < 7200: # 7200 ثانية = ساعتين
+        if file_age < 7200: 
             need_update = False
             
     if need_update:
-        # تشغيل التحديث في الخلفية بدون ما نوقف المتصفح
         threading.Thread(target=fetch_and_build_html).start()
-        
+        # مسح الملف القديم عشان ما يعرضه بالغلط إذا كان فيه تحديث جديد
+        if os.path.exists(CACHE_FILE):
+            os.remove(CACHE_FILE)
+            
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r", encoding="utf-8") as f:
             return f.read()
     else:
         return """
         <div style="text-align:center; margin-top:100px; font-family:sans-serif; direction:rtl;">
-            <h1 style="color:#004d40;">⚙️ جاري تجهيز التقرير لأول مرة...</h1>
-            <p style="font-size:1.2em; color:#555;">النظام يقوم حالياً بسحب ومعالجة آلاف البيانات من السيرفرات في الخلفية.</p>
-            <b style="color:red;">يرجى تحديث الصفحة (F5) بعد دقيقتين أو ثلاث دقائق.</b>
+            <h1 style="color:#004d40;">⚙️ جاري محاولة الاتصال بنظام سجل...</h1>
+            <p style="font-size:1.2em; color:#555;">يرجى الانتظار 30 ثانية ثم تحديث الصفحة (F5).</p>
         </div>
         """
 
