@@ -32,7 +32,6 @@ def fetch_and_build_html():
 
     try:
         url = "https://tnql-prod.sejeltech.app/api/StaffMember/GetStaffMember"
-        
         TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NjEyNTM4LCJleHAiOjE3Nzc2NTU3MzgsImlhdCI6MTc3NzYxMjUzOCwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.kllYcwHoTovb_nsqYEmgwiEi2fyR8qI8FV8pQh8yKlE"
         
         headers = {
@@ -42,98 +41,104 @@ def fetch_and_build_html():
             "lang": "ar"
         }
         
-        payload = {
-            "paging": {
-                "sortField": "Id", "searchOrder": 2, "pageIndex": 1,
-                "totalRowsCount": 7480, "totalPages": 748, "pageSize": 5000, "sortBy": "Id Desc"
-            },
-            "data": {
-                "searchText": "", "name": "", "EmployeeId": None,
-                "OccupationIds": [], "DepartmentIds": [], "SectionIds": [],
-                "WorkShiftIds": [], "EmployeeTypes": [], "ManagerIds": [],
-                "OperatorCompanyIds": [], "NationalIdExpired": [],
-                "ActiveStatus": [True], "isPrinted": None, "isDeleted": False
-            }
-        }
-
-        response = requests.post(url, headers=headers, json=payload, timeout=200)
+        lite_data = []
+        page_size = 1500 # سحب البيانات على دفعات صغيرة لحماية السيرفر
         
-        if response.status_code == 200:
-            try:
-                api_res = response.json()
-            except:
-                api_res = None
+        # 🔥 تكتيك التجزئة: حلقة تكرارية تسحب البيانات دفعة دفعة 🔥
+        for page in range(1, 15): # نلف حتى 15 صفحة كحد أقصى (15*1500 = 22,500 موظف)
+            payload = {
+                "paging": {
+                    "sortField": "Id", "searchOrder": 2, "pageIndex": page,
+                    "pageSize": page_size, "sortBy": "Id Desc"
+                },
+                "data": {
+                    "searchText": "", "name": "", "EmployeeId": None,
+                    "OccupationIds": [], "DepartmentIds": [], "SectionIds": [],
+                    "WorkShiftIds": [], "EmployeeTypes": [], "ManagerIds": [],
+                    "OperatorCompanyIds": [], "NationalIdExpired": [],
+                    "ActiveStatus": [True], "isPrinted": None, "isDeleted": False
+                }
+            }
+
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+            
+            if response.status_code != 200:
+                break
                 
-            if not isinstance(api_res, dict): return
+            api_res = response.json()
+            if not isinstance(api_res, dict): break
                 
             res_data = api_res.get('data')
-            if res_data is None: return
+            if res_data is None: break
 
             all_employees = res_data if isinstance(res_data, list) else res_data.get('list', [])
-            if not all_employees: return
+            if not all_employees: 
+                break # إذا مافي بيانات، يعني خلصنا كل الموظفين فنوقف الحلقة
 
-            # 🔥 الهندسة الصارمة للذاكرة: أخذ الخانات المهمة فقط ورمي الباقي 🔥
             keys_to_keep = ['nationalId', 'operatorCompanyName', 'workShiftName', 'occupationName', 'employeeTypeName']
-            lite_data = []
             for emp in all_employees:
                 lite_data.append({k: emp.get(k) for k in keys_to_keep})
                 
-            # مسح البيانات الأصلية الضخمة من الرام فوراً
+            # تنظيف الرام بعد كل صفحة
             del api_res, res_data, all_employees
-            gc.collect() 
-
-            df = pd.DataFrame(lite_data)
-            del lite_data
             gc.collect()
-
-            df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
-
-            if os.path.exists(EXCEL_FILE_PATH):
-                try:
-                    df_excel = pd.read_excel(EXCEL_FILE_PATH)
-                    df[API_COL_ID] = df[API_COL_ID].astype(str).str.strip()
-                    id_col = next((c for c in COL_NAMES_ID if c in df_excel.columns), None)
-                    if id_col:
-                        # تصفية الإكسيل وأخذ الأعمدة المهمة فقط لتخفيف الرام
-                        cols_to_keep = [id_col] + [c for c in (COL_NAMES_COMPANY + COL_NAMES_JOB + COL_NAMES_SHIFT) if c in df_excel.columns]
-                        df_excel = df_excel[cols_to_keep].drop_duplicates(subset=[id_col])
-                        
-                        df_excel[id_col] = df_excel[id_col].astype(str).str.strip()
-                        df = pd.merge(df, df_excel, left_on=API_COL_ID, right_on=id_col, how='left')
-                        
-                        # تدمير الإكسيل من الذاكرة
-                        del df_excel
-                        gc.collect()
-
-                        for api_c, ex_list in [('operatorCompanyName', COL_NAMES_COMPANY), ('occupationName', COL_NAMES_JOB), ('workShiftName', COL_NAMES_SHIFT)]:
-                            ex_c = next((c for c in ex_list if c in df.columns), None)
-                            if ex_c: df[api_c] = df[ex_c].fillna(df[api_c])
-                except Exception as e:
-                    pass
-
-            df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
-
-            total_employees = len(df)
-            total_companies = df['operatorCompanyName'].nunique()
-            total_shifts = df['workShiftName'].nunique()
             
-            def clean_type(val):
-                v = str(val).lower()
-                if 'seasonal' in v or 'موسمي' in v: return 'موسمي'
-                if 'permanent' in v or 'دائم' in v: return 'دائم'
-                return 'غير محدد'
-                
-            df['mapped_type'] = df['employeeTypeName'].apply(clean_type)
-            permanent_count = len(df[df['mapped_type'] == 'دائم'])
-            seasonal_count = len(df[df['mapped_type'] == 'موسمي'])
+            # حماية إضافية
+            time.sleep(1) 
 
-            df_lite = df[['operatorCompanyName', 'workShiftName', 'occupationName']].copy()
-            del df
-            gc.collect()
+        if not lite_data:
+            error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px;'>⚠️ لم يتم العثور على بيانات أو التوكن منتهي.</h1>"
+            with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                f.write(error_msg)
+            return
 
-            current_time = datetime.now().strftime("%I:%M %p")
+        df = pd.DataFrame(lite_data)
+        del lite_data
+        gc.collect()
 
-            html_content = f"""<!DOCTYPE html>
+        df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
+
+        if os.path.exists(EXCEL_FILE_PATH):
+            try:
+                df_excel = pd.read_excel(EXCEL_FILE_PATH)
+                df[API_COL_ID] = df[API_COL_ID].astype(str).str.strip()
+                id_col = next((c for c in COL_NAMES_ID if c in df_excel.columns), None)
+                if id_col:
+                    cols_to_keep = [id_col] + [c for c in (COL_NAMES_COMPANY + COL_NAMES_JOB + COL_NAMES_SHIFT) if c in df_excel.columns]
+                    df_excel = df_excel[cols_to_keep].drop_duplicates(subset=[id_col])
+                    df_excel[id_col] = df_excel[id_col].astype(str).str.strip()
+                    df = pd.merge(df, df_excel, left_on=API_COL_ID, right_on=id_col, how='left')
+                    del df_excel
+                    gc.collect()
+                    for api_c, ex_list in [('operatorCompanyName', COL_NAMES_COMPANY), ('occupationName', COL_NAMES_JOB), ('workShiftName', COL_NAMES_SHIFT)]:
+                        ex_c = next((c for c in ex_list if c in df.columns), None)
+                        if ex_c: df[api_c] = df[ex_c].fillna(df[api_c])
+            except Exception as e:
+                pass
+
+        df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
+
+        total_employees = len(df)
+        total_companies = df['operatorCompanyName'].nunique()
+        total_shifts = df['workShiftName'].nunique()
+        
+        def clean_type(val):
+            v = str(val).lower()
+            if 'seasonal' in v or 'موسمي' in v: return 'موسمي'
+            if 'permanent' in v or 'دائم' in v: return 'دائم'
+            return 'غير محدد'
+            
+        df['mapped_type'] = df['employeeTypeName'].apply(clean_type)
+        permanent_count = len(df[df['mapped_type'] == 'دائم'])
+        seasonal_count = len(df[df['mapped_type'] == 'موسمي'])
+
+        df_lite = df[['operatorCompanyName', 'workShiftName', 'occupationName']].copy()
+        del df
+        gc.collect()
+
+        current_time = datetime.now().strftime("%I:%M %p")
+
+        html_content = f"""<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -188,11 +193,13 @@ def fetch_and_build_html():
     <div class="grand-summary"><h2>📊 الملخص العام للوظائف (كافة الشركات)</h2><div class="grand-grid">{" ".join([f'<div class="grand-item"><span>{j}</span><span class="job-val">{v}</span></div>' for j, v in df_lite['occupationName'].value_counts().items()])}</div></div>
     <div class="footer" dir="ltr">PREPARED BY<br><b>Eng. Abdulaziz Alshehri</b></div>
 </body></html>"""
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            f.write(html_content)
             
-            with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                f.write(html_content)
     except Exception as e:
-        print(f"Error: {e}")
+        error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px;'>⚠️ خطأ برمجي أثناء سحب البيانات:<br>{str(e)}</h1>"
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            f.write(error_msg)
     finally:
         is_updating = False
 
@@ -206,19 +213,15 @@ def index():
             
     if need_update:
         threading.Thread(target=fetch_and_build_html).start()
-        if os.path.exists(CACHE_FILE):
-            os.remove(CACHE_FILE)
-            
+        # نكتب ملف مؤقت عشان نمنع السبام (F5) من تحميل السيرفر
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            f.write("""<div style="text-align:center; margin-top:100px; font-family:sans-serif; direction:rtl;"><h1 style="color:#004d40;">⚙️ جاري معالجة التقرير بدقة (نظام التجزئة يعمل)...</h1><p style="font-size:1.2em; color:#555;">الرجاء عدم تحديث الصفحة بشكل متكرر. انتظر دقيقة واحدة ثم حدث الصفحة.</p></div>""")
+        
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r", encoding="utf-8") as f:
             return f.read()
     else:
-        return """
-        <div style="text-align:center; margin-top:100px; font-family:sans-serif; direction:rtl;">
-            <h1 style="color:#004d40;">⚙️ جاري معالجة التقرير...</h1>
-            <p style="font-size:1.2em; color:#555;">يرجى الانتظار دقيقة واحدة ثم تحديث الصفحة (F5).</p>
-        </div>
-        """
+        return "جاري بدء النظام..."
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
