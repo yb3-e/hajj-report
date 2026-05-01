@@ -32,9 +32,13 @@ def fetch_and_build_html():
 
     try:
         url = "https://tnql-prod.sejeltech.app/api/StaffMember/GetStaffMember"
+        
+        # التوكن الجديد (تم التحديث بنجاح)
+        TOKEN = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NjEyNTM4LCJleHAiOjE3Nzc2NTU3MzgsImlhdCI6MTc3NzYxMjUzOCwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.kllYcwHoTovb_nsqYEmgwiEi2fyR8qI8FV8pQh8yKlE"
+        
         headers = {
             "accept": "application/json",
-            "authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJuYW1laWQiOiIxNjQ5MSIsInVuaXF1ZV9uYW1lIjoi2LnYqNiv2KfZhNi52LLZitiyINi52KjYr9in2YTZhNmHINin2YTYtNmH2LHZiiIsImVtYWlsIjoiRTExMjY0MTU2MzUiLCJwcmltYXJ5Z3JvdXBzaWQiOiJFbXBsb3llZSIsIkFwcGxpY2F0aW9uIjoiUG9ydGFsIiwiRGV2aWNlU2VyaWFsIjoiIiwibmJmIjoxNzc3NTg3MTU2LCJleHAiOjE3Nzc2MzAzNTYsImlhdCI6MTc3NzU4NzE1NiwiaXNzIjoiVGFuYXFvbEFQSSIsImF1ZCI6IlRhbmFxb2xBUEkifQ.VEp2uPPTCMPM_vtbw5cuEpH3tMM7vpHbkA17h0wkYbo",
+            "authorization": TOKEN,
             "content-type": "application/json",
             "lang": "ar",
             "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
@@ -43,7 +47,7 @@ def fetch_and_build_html():
         payload = {
             "paging": {
                 "sortField": "Id", "searchOrder": 2, "pageIndex": 1,
-                "totalRowsCount": 10437, "totalPages": 1044, "pageSize": 5000, "sortBy": "Id Desc"
+                "totalRowsCount": 7480, "totalPages": 748, "pageSize": 5000, "sortBy": "Id Desc"
             },
             "data": {
                 "searchText": "", "ActiveStatus": [True], "isDeleted": False
@@ -53,13 +57,29 @@ def fetch_and_build_html():
         response = requests.post(url, headers=headers, json=payload, timeout=200)
         
         if response.status_code == 200:
-            api_res = response.json()
-            res_data = api_res.get('data', {})
+            try:
+                api_res = response.json()
+            except:
+                api_res = None
+                
+            if not isinstance(api_res, dict):
+                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ نظام سجل رفض إرسال البيانات!<br>السبب الأكيد: انتهت صلاحية التوكن (Token) ويحتاج تحديث.</h1>"
+                with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                    f.write(error_msg)
+                return
+                
+            res_data = api_res.get('data')
+            if res_data is None:
+                msg = api_res.get('message', 'لا توجد بيانات')
+                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ سجل رفض إعطاء البيانات!<br>الرسالة: {msg}<br>السبب: التوكن منتهي.</h1>"
+                with open(CACHE_FILE, "w", encoding="utf-8") as f:
+                    f.write(error_msg)
+                return
+
             all_employees = res_data if isinstance(res_data, list) else res_data.get('list', [])
             
             if not all_employees:
-                # إذا السيرفر رد بس مافي بيانات
-                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ نظام سجل رفض إرسال البيانات!<br>السبب المتوقع: التوكن انتهى أو هناك حظر جغرافي على سيرفرات Render.</h1>"
+                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ لا يوجد موظفين فعالين في النظام حالياً!</h1>"
                 with open(CACHE_FILE, "w", encoding="utf-8") as f:
                     f.write(error_msg)
                 return
@@ -149,7 +169,7 @@ def fetch_and_build_html():
     <div class="header">
         <div class="eng-badge" dir="ltr"><span class="title">Eng.</span><span class="name">Abdulaziz Alshehri</span></div>
         <h1>التقرير الشامل لموسم حج 1447</h1>
-        <div class="live-indicator"><span class="pulse"></span>آخر تحديث تلقائي للبيانات: {current_time}</div>
+        <div class="live-indicator"><span class="pulse"></span>آخر تحديث للبيانات: {current_time}</div>
     </div>
     <div class="stats-container">
         <div class="stat-card"><b>{total_employees}</b><span>إجمالي الفعالين</span></div>
@@ -168,13 +188,11 @@ def fetch_and_build_html():
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
                 f.write(html_content)
         else:
-            # إذا رفض الاتصال برمز خطأ (مثل 401 أو 403 أو 500)
             error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ سيرفر سجل رفض الاتصال!<br>رمز الخطأ: {response.status_code}</h1>"
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
                 f.write(error_msg)
                 
     except Exception as e:
-        # إذا انقطع الاتصال تماماً (Timeout)
         error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ انتهى الوقت (Timeout) ولم يرد سيرفر سجل!<br>التفاصيل: {str(e)}</h1>"
         with open(CACHE_FILE, "w", encoding="utf-8") as f:
             f.write(error_msg)
@@ -191,7 +209,6 @@ def index():
             
     if need_update:
         threading.Thread(target=fetch_and_build_html).start()
-        # مسح الملف القديم عشان ما يعرضه بالغلط إذا كان فيه تحديث جديد
         if os.path.exists(CACHE_FILE):
             os.remove(CACHE_FILE)
             
@@ -202,7 +219,7 @@ def index():
         return """
         <div style="text-align:center; margin-top:100px; font-family:sans-serif; direction:rtl;">
             <h1 style="color:#004d40;">⚙️ جاري محاولة الاتصال بنظام سجل...</h1>
-            <p style="font-size:1.2em; color:#555;">يرجى الانتظار 30 ثانية ثم تحديث الصفحة (F5).</p>
+            <p style="font-size:1.2em; color:#555;">يرجى الانتظار دقيقة واحدة ثم تحديث الصفحة (F5).</p>
         </div>
         """
 
