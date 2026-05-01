@@ -39,31 +39,20 @@ def fetch_and_build_html():
             "accept": "application/json",
             "authorization": TOKEN,
             "content-type": "application/json",
-            "lang": "ar",
-            "referrer": "https://tnql-prod.sejeltech.app/human-resource/staff-list"
+            "lang": "ar"
         }
         
-        # ⚠️ هنا التعديل: رجعنا كل الخانات اللي يطلبها السيرفر بالضبط
         payload = {
             "paging": {
                 "sortField": "Id", "searchOrder": 2, "pageIndex": 1,
                 "totalRowsCount": 7480, "totalPages": 748, "pageSize": 5000, "sortBy": "Id Desc"
             },
             "data": {
-                "searchText": "",
-                "name": "",
-                "EmployeeId": None,
-                "OccupationIds": [],
-                "DepartmentIds": [],
-                "SectionIds": [],
-                "WorkShiftIds": [],
-                "EmployeeTypes": [],
-                "ManagerIds": [],
-                "OperatorCompanyIds": [],
-                "NationalIdExpired": [],
-                "ActiveStatus": [True],
-                "isPrinted": None,
-                "isDeleted": False
+                "searchText": "", "name": "", "EmployeeId": None,
+                "OccupationIds": [], "DepartmentIds": [], "SectionIds": [],
+                "WorkShiftIds": [], "EmployeeTypes": [], "ManagerIds": [],
+                "OperatorCompanyIds": [], "NationalIdExpired": [],
+                "ActiveStatus": [True], "isPrinted": None, "isDeleted": False
             }
         }
 
@@ -75,31 +64,27 @@ def fetch_and_build_html():
             except:
                 api_res = None
                 
-            if not isinstance(api_res, dict):
-                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ نظام سجل رفض إرسال البيانات بشكل غير متوقع.</h1>"
-                with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                    f.write(error_msg)
-                return
+            if not isinstance(api_res, dict): return
                 
             res_data = api_res.get('data')
-            if res_data is None:
-                msg = api_res.get('message', 'لا توجد بيانات')
-                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ سجل رفض إعطاء البيانات!<br>الرسالة: {msg}</h1>"
-                with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                    f.write(error_msg)
-                return
+            if res_data is None: return
 
             all_employees = res_data if isinstance(res_data, list) else res_data.get('list', [])
-            
-            if not all_employees:
-                error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ لا يوجد موظفين فعالين في النظام حالياً!</h1>"
-                with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                    f.write(error_msg)
-                return
+            if not all_employees: return
 
-            df = pd.DataFrame(all_employees)
+            # 🔥 الهندسة الصارمة للذاكرة: أخذ الخانات المهمة فقط ورمي الباقي 🔥
+            keys_to_keep = ['nationalId', 'operatorCompanyName', 'workShiftName', 'occupationName', 'employeeTypeName']
+            lite_data = []
+            for emp in all_employees:
+                lite_data.append({k: emp.get(k) for k in keys_to_keep})
+                
+            # مسح البيانات الأصلية الضخمة من الرام فوراً
             del api_res, res_data, all_employees
             gc.collect() 
+
+            df = pd.DataFrame(lite_data)
+            del lite_data
+            gc.collect()
 
             df = df.fillna('غير محدد').replace(['null', 'None', 'nan', '', None], 'غير محدد')
 
@@ -109,11 +94,17 @@ def fetch_and_build_html():
                     df[API_COL_ID] = df[API_COL_ID].astype(str).str.strip()
                     id_col = next((c for c in COL_NAMES_ID if c in df_excel.columns), None)
                     if id_col:
+                        # تصفية الإكسيل وأخذ الأعمدة المهمة فقط لتخفيف الرام
+                        cols_to_keep = [id_col] + [c for c in (COL_NAMES_COMPANY + COL_NAMES_JOB + COL_NAMES_SHIFT) if c in df_excel.columns]
+                        df_excel = df_excel[cols_to_keep].drop_duplicates(subset=[id_col])
+                        
                         df_excel[id_col] = df_excel[id_col].astype(str).str.strip()
-                        excel_subset = df_excel.drop_duplicates(subset=[id_col])
-                        df = pd.merge(df, excel_subset, left_on=API_COL_ID, right_on=id_col, how='left')
-                        del df_excel, excel_subset
+                        df = pd.merge(df, df_excel, left_on=API_COL_ID, right_on=id_col, how='left')
+                        
+                        # تدمير الإكسيل من الذاكرة
+                        del df_excel
                         gc.collect()
+
                         for api_c, ex_list in [('operatorCompanyName', COL_NAMES_COMPANY), ('occupationName', COL_NAMES_JOB), ('workShiftName', COL_NAMES_SHIFT)]:
                             ex_c = next((c for c in ex_list if c in df.columns), None)
                             if ex_c: df[api_c] = df[ex_c].fillna(df[api_c])
@@ -200,15 +191,8 @@ def fetch_and_build_html():
             
             with open(CACHE_FILE, "w", encoding="utf-8") as f:
                 f.write(html_content)
-        else:
-            error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ سيرفر سجل رفض الاتصال!<br>رمز الخطأ: {response.status_code}</h1>"
-            with open(CACHE_FILE, "w", encoding="utf-8") as f:
-                f.write(error_msg)
-                
     except Exception as e:
-        error_msg = f"<h1 dir='rtl' style='text-align:center; color:#c0392b; margin-top:100px; font-family:sans-serif;'>⚠️ انتهى الوقت ولم يرد سيرفر سجل!<br>التفاصيل: {str(e)}</h1>"
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            f.write(error_msg)
+        print(f"Error: {e}")
     finally:
         is_updating = False
 
